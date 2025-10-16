@@ -1,7 +1,19 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
-import { streamText, convertToModelMessages } from "ai"
+import { streamText } from "ai"
 import { sql } from "@/lib/db"
 import { stackServerApp } from "@/stack"
+import {
+  getOrCreateConversation,
+  saveMessage,
+  buildConversationContext,
+  progressConversationStage,
+  generateConversationTitle,
+  updateConversationTitle,
+} from "@/lib/services/conversation"
+import { getSystemPromptForStage, shouldTransitionStage, getSuggestedRepliesForStage } from "@/lib/flow"
+import { parseCheckInFromText, createCheckIn } from "@/lib/services/check-in"
+import { parseJournalFromText, createJournalEntry } from "@/lib/services/journal"
+import { checkAndCreateAutoMilestones } from "@/lib/services/milestone"
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_API_KEY || "",
@@ -15,103 +27,176 @@ export async function POST(req: Request) {
       return new Response("Unauthorized", { status: 401 })
     }
 
-    const { messages } = await req.json()
+    const { messages, conversationId } = await req.json()
     const userId = user.id
 
-    // Ensure user exists in users_sync table
-    const userExists = await sql`
-      SELECT id FROM neon_auth.users_sync WHERE id = ${userId}
-    `
+    await ensureUserSynced(userId, user)
 
-    if (userExists.length === 0) {
-      const userJson = JSON.stringify({
-        id: userId,
-        display_name: user.displayName || null,
-        primary_email: user.primaryEmail || null,
-        signed_up_at_millis: Date.now(),
-      })
+    const conversation = conversationId
+      ? await getExistingConversation(conversationId, userId)
+      : await getOrCreateConversation(userId)
 
-      await sql`
-        INSERT INTO neon_auth.users_sync (raw_json)
-        VALUES (${userJson})
-        ON CONFLICT (id) DO NOTHING
-      `
-    }
-
-    // Get or create conversation
     const userMessage = messages[messages.length - 1]
-    const conversation = await sql`
-      INSERT INTO conversations (user_id, title)
-      VALUES (${userId}, 'New Conversation')
-      RETURNING id
-    `
-    const convId = conversation[0].id
+    const userMessageContent = extractMessageContent(userMessage)
 
-    // Extract text content from message parts
-    const userMessageContent =
-      userMessage.parts
-        ?.filter((part: { type: string }) => part.type === "text")
-        .map((part: { text: string }) => part.text)
-        .join(" ") || ""
+    await saveMessage(conversation.id, "user", userMessageContent)
 
-    // Save user message to database
-    await sql`
-      INSERT INTO messages (conversation_id, role, content)
-      VALUES (${convId}, 'user', ${userMessageContent})
-    `
+    const context = await buildConversationContext(
+      userId,
+      conversation.id,
+      conversation.stage
+    )
 
-    // Recovery-focused system prompt
-    const systemPrompt = `You are a compassionate AI companion for individuals in recovery from addiction. Your role is to:
+    const systemPrompt = getSystemPromptForStage(conversation.stage, context)
 
-- Provide empathetic, non-judgmental support
-- Encourage healthy coping mechanisms and self-reflection
-- Celebrate progress, no matter how small
-- Offer gentle guidance without being prescriptive
-- Help users identify triggers and develop strategies
-- Promote mindfulness, gratitude, and self-compassion
-- Recognize signs of crisis and encourage professional help when needed
+    const conversationHistory = (context.recentMessages || [])
+      .filter((msg) => msg.content && msg.content.trim())
+      .map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }))
 
-Guidelines:
-- Use warm, supportive language
-- Validate feelings and experiences
-- Ask thoughtful questions to promote reflection
-- Offer encouragement and hope
-- Never provide medical advice
-- If the user expresses suicidal thoughts or immediate danger, encourage them to contact emergency services or a crisis hotline
+    const clientMessages = messages
+      .map((msg: { role?: string; content?: string; parts?: Array<{ type: string; text?: string }> }) => {
+        const content = extractMessageContent(msg)
+        return {
+          role: msg.role || 'user',
+          content: content,
+        }
+      })
+      .filter((msg: { role: string; content: string }) => msg.content && msg.content.trim())
 
-Remember: You're here to listen, support, and empower. Every conversation is confidential and judgment-free.`
+    const allMessages = [...conversationHistory, ...clientMessages]
 
-    // Convert UIMessages to CoreMessages format
-    const coreMessages = convertToModelMessages(messages)
+    let stageMessageCount = (context.recentMessages || []).filter(
+      (m) => m.role === "user"
+    ).length
 
-    // Use the new AI SDK streamText
+    let nextStage = conversation.stage
+
     const result = streamText({
       model: google("gemini-2.5-flash"),
       system: systemPrompt,
-      messages: coreMessages,
+      messages: allMessages,
       async onFinish({ text }) {
-        // Save assistant response to database
-        await sql`
-          INSERT INTO messages (conversation_id, role, content)
-          VALUES (${convId}, 'assistant', ${text})
-        `
+        await saveMessage(conversation.id, "assistant", text)
 
-        // Update conversation timestamp
-        await sql`
-          UPDATE conversations
-          SET updated_at = NOW()
-          WHERE id = ${convId}
-        `
+        await handleStageSpecificActions(
+          userId,
+          conversation.stage,
+          userMessageContent
+        )
+
+        if (
+          shouldTransitionStage(
+            conversation.stage,
+            stageMessageCount + 1,
+            userMessageContent
+          )
+        ) {
+          nextStage = await progressConversationStage(conversation.id, conversation.stage)
+        }
+
+        if ((context.recentMessages || []).length <= 2) {
+          const title = generateConversationTitle([
+            ...(context.recentMessages || []),
+            { id: 0, conversation_id: conversation.id, role: "user", content: userMessageContent, created_at: new Date() },
+          ])
+          await updateConversationTitle(conversation.id, title)
+        }
+
+        await checkAndCreateAutoMilestones(userId)
       },
     })
 
+    const suggestedReplies = getSuggestedRepliesForStage(nextStage, context)
+
     return result.toUIMessageStreamResponse({
       headers: {
-        "X-Conversation-Id": convId.toString(),
+        "X-Conversation-Id": conversation.id.toString(),
+        "X-Current-Stage": nextStage,
+        "X-Suggested-Replies": JSON.stringify(suggestedReplies),
       },
     })
   } catch (error) {
     console.error("Error in chat route:", error)
-    return new Response("Internal Server Error", { status: 500 })
+    return new Response(
+      JSON.stringify({ error: "Internal Server Error", details: String(error) }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    )
+  }
+}
+
+async function ensureUserSynced(userId: string, user: { displayName?: string | null; primaryEmail?: string | null }) {
+  const userExists = await sql`
+    SELECT id FROM neon_auth.users_sync WHERE id = ${userId}
+  `
+
+  if (userExists.length === 0) {
+    const userJson = JSON.stringify({
+      id: userId,
+      display_name: user.displayName || null,
+      primary_email: user.primaryEmail || null,
+      signed_up_at_millis: Date.now(),
+    })
+
+    await sql`
+      INSERT INTO neon_auth.users_sync (raw_json)
+      VALUES (${userJson})
+      ON CONFLICT (id) DO NOTHING
+    `
+  }
+}
+
+async function getExistingConversation(conversationId: number, userId: string) {
+  const result = await sql`
+    SELECT id, user_id, title, stage, created_at, updated_at
+    FROM conversations
+    WHERE id = ${conversationId} AND user_id = ${userId}
+  `
+
+  if (result.length === 0) {
+    throw new Error("Conversation not found or unauthorized")
+  }
+
+  return result[0]
+}
+
+function extractMessageContent(message: { content?: string; parts?: Array<{ type: string; text?: string }> }): string {
+  if (message.content) {
+    return message.content
+  }
+
+  return (
+    message.parts
+      ?.filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join(" ") || ""
+  )
+}
+
+async function handleStageSpecificActions(
+  userId: string,
+  stage: string,
+  userMessage: string
+) {
+  try {
+    if (stage === "check_in") {
+      const checkInData = parseCheckInFromText(userMessage)
+      if (checkInData) {
+        await createCheckIn(userId, checkInData)
+        console.log(`Check-in created for user ${userId}`)
+      }
+    }
+
+    if (stage === "journal_prompt") {
+      const journalData = parseJournalFromText(userMessage)
+      if (journalData) {
+        await createJournalEntry(userId, journalData)
+        console.log(`Journal entry created for user ${userId}`)
+      }
+    }
+  } catch (error) {
+    console.error("Error handling stage-specific actions:", error)
   }
 }

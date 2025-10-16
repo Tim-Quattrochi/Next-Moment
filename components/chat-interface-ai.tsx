@@ -10,6 +10,11 @@ import { cn } from "@/lib/utils"
 import { useUser } from "@/lib/hooks/use-user"
 import { useChat } from "@ai-sdk/react"
 
+interface SuggestedReply {
+  text: string
+  type?: "quick" | "detailed"
+}
+
 interface ChatInterfaceProps {
   onNavigate: (view: "chat" | "check-in" | "garden" | "journal") => void
 }
@@ -19,6 +24,11 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [input, setInput] = useState("")
+  const [suggestedReplies, setSuggestedReplies] = useState<SuggestedReply[]>([
+    { text: "Yes, let's check in", type: "quick" },
+    { text: "Tell me more about how this works", type: "detailed" },
+    { text: "I'm ready to start", type: "quick" },
+  ])
 
   const { messages, sendMessage, status } = useChat({
     onError: (error) => {
@@ -46,6 +56,51 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
     // Refocus input after sending
     setTimeout(() => inputRef.current?.focus(), 0)
   }
+
+  const handleSuggestedReplyClick = (replyText: string) => {
+    if (isLoading) return
+
+    // Send the suggested reply as a message
+    sendMessage({
+      role: "user",
+      parts: [{ type: "text", text: replyText }],
+    })
+  }
+
+  // Update suggested replies based on conversation progress
+  // This is a simple client-side simulation until we can properly access response headers
+  useEffect(() => {
+    if (messages.length === 0) {
+      // Greeting stage
+      setSuggestedReplies([
+        { text: "Yes, let's check in", type: "quick" },
+        { text: "Tell me more about how this works", type: "detailed" },
+        { text: "I'm ready to start", type: "quick" },
+      ])
+    } else if (messages.length <= 3) {
+      // Check-in stage
+      setSuggestedReplies([
+        { text: "I'm feeling calm today", type: "quick" },
+        { text: "I slept well, about 4/5", type: "quick" },
+        { text: "My energy level is 3/5", type: "quick" },
+        { text: "I want to stay focused and positive today", type: "detailed" },
+      ])
+    } else if (messages.length <= 6) {
+      // Journal prompt stage
+      setSuggestedReplies([
+        { text: "I'd like to journal about today", type: "quick" },
+        { text: "I'm grateful for my progress", type: "detailed" },
+        { text: "Let me reflect on my challenges", type: "detailed" },
+      ])
+    } else {
+      // Affirmation / reflection stage
+      setSuggestedReplies([
+        { text: "Thank you, that means a lot", type: "quick" },
+        { text: "I've noticed positive changes", type: "detailed" },
+        { text: "Tell me more", type: "detailed" },
+      ])
+    }
+  }, [messages.length])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInput(e.target.value)
@@ -186,27 +241,50 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
       </div>
 
       <div className="glass-strong border-t border-border/50 px-4 py-4">
-        <form onSubmit={handleSubmit} className="mx-auto flex max-w-4xl gap-3">
-          <Input
-            ref={inputRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Share what's on your mind..."
-            className="h-14 flex-1 rounded-2xl border-border/50 bg-background/50 px-6 text-base shadow-sm transition-all focus:shadow-md"
-            aria-label="Message input"
-            disabled={isLoading}
-            autoFocus
-          />
-          <Button
-            type="submit"
-            disabled={!input.trim() || isLoading}
-            className="h-14 w-14 rounded-2xl bg-gradient-to-br from-[#3B82F6] to-[#10B981] text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl disabled:opacity-50 disabled:hover:scale-100"
-            aria-label="Send message"
-          >
-            <Send className="h-5 w-5" />
-          </Button>
-        </form>
+        <div className="mx-auto max-w-4xl">
+          {/* Suggested Replies */}
+          {suggestedReplies.length > 0 && !isLoading && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {suggestedReplies.map((reply, index) => (
+                <Button
+                  key={index}
+                  variant="outline"
+                  onClick={() => handleSuggestedReplyClick(reply.text)}
+                  className={cn(
+                    "rounded-full border-border/50 bg-background/50 text-sm transition-all hover:scale-105 hover:border-[#3B82F6] hover:bg-[#3B82F6]/10 hover:text-[#3B82F6]",
+                    reply.type === "quick" && "px-4 py-2",
+                    reply.type === "detailed" && "px-5 py-2.5"
+                  )}
+                >
+                  {reply.text}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {/* Input Form */}
+          <form onSubmit={handleSubmit} className="flex gap-3">
+            <Input
+              ref={inputRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Share what's on your mind..."
+              className="h-14 flex-1 rounded-2xl border-border/50 bg-background/50 px-6 text-base shadow-sm transition-all focus:shadow-md"
+              aria-label="Message input"
+              disabled={isLoading}
+              autoFocus
+            />
+            <Button
+              type="submit"
+              disabled={!input.trim() || isLoading}
+              className="h-14 w-14 rounded-2xl bg-gradient-to-br from-[#3B82F6] to-[#10B981] text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl disabled:opacity-50 disabled:hover:scale-100"
+              aria-label="Send message"
+            >
+              <Send className="h-5 w-5" />
+            </Button>
+          </form>
+        </div>
       </div>
     </div>
   )
