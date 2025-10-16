@@ -24,10 +24,69 @@ A Next.js 15 + TypeScript wellness application with a premium "Wellness Luxury" 
 
 ## Database Setup
 
-The app uses Neon PostgreSQL for data persistence. Run the SQL scripts in order:
+The app uses Neon PostgreSQL for data persistence.
+
+### Quick Setup (Recommended)
+
+Run the provided shell script to automatically set up the database:
+
+```bash
+./scripts/seed-database.sh
+```
+
+This will:
+1. Create all necessary tables
+2. Seed demo user data
+3. Display the demo user credentials
+
+### Manual Setup
+
+Alternatively, run the SQL scripts manually in order:
 
 1. `scripts/001_create_tables.sql` - Creates all necessary tables
 2. `scripts/002_seed_initial_data.sql` - Seeds initial demo data
+
+```bash
+psql $DATABASE_URL -f scripts/001_create_tables.sql
+psql $DATABASE_URL -f scripts/002_seed_initial_data.sql
+```
+
+### Demo User Setup
+
+The seed script includes comprehensive demo data. To use it:
+
+**Step 1: Create Demo User in Stack Auth**
+
+1. Visit [Stack Auth Dashboard](https://app.stack-auth.com/projects/83d1f3ba-918a-4b4b-ae8e-fbba8bc7aa0d)
+2. Navigate to the Users section
+3. Create a new user:
+   - **Email**: `demo@example.com`
+   - **Password**: `Demo123!` (or your choice)
+4. Copy the **User ID** that Stack Auth assigns (e.g., `e0200e3d-5b44-41a1-9173-838d9718a845`)
+
+**Step 2: Update Seed Script**
+
+1. Open `scripts/002_seed_initial_data.sql`
+2. Find all instances of `demo-user-123`
+3. Replace with the actual Stack Auth user ID from Step 1
+4. Save the file
+
+**Step 3: Run Database Setup**
+
+```bash
+./scripts/seed-database.sh
+```
+
+**Demo Data Includes:**
+- 5 journal entries spanning 7 days of a recovery journey
+- 8 check-ins with varied moods (hopeful, calm, anxious, grateful, determined, peaceful, reflective)
+- 5 milestones at different progress levels (some unlocked, some in progress)
+- 3 complete conversation threads with realistic message history:
+  - Welcome conversation (5 messages)
+  - Coping with triggers (6 messages)
+  - Building healthy routines (4 messages)
+
+**Sign In**: Use `demo@example.com` with the password you set in Stack Auth.
 
 ## Authentication
 
