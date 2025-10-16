@@ -2,116 +2,77 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect } from "react"
+import { useRef, useEffect, useState, type FormEvent } from "react"
 import { Send, Sparkles, Calendar, Sprout, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import useSWR from "swr"
 import { useUser } from "@/lib/hooks/use-user"
 import { useChat } from "@ai-sdk/react"
-
-interface Message {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  timestamp: Date
-}
 
 interface ChatInterfaceProps {
   onNavigate: (view: "chat" | "check-in" | "garden" | "journal") => void
 }
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
-
 export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   const { user } = useUser()
-  const [conversationId, setConversationId] = useState<number | null>(null)
-
-  const { data, mutate } = useSWR(
-    user ? `/api/messages?userId=${user.id}${conversationId ? `&conversationId=${conversationId}` : ""}` : null,
-    fetcher,
-    {
-      refreshInterval: 0,
-      revalidateOnFocus: false,
-    },
-  )
-
-  const messages: Message[] =
-    data?.messages?.map((m: any) => ({
-      ...m,
-      timestamp: new Date(m.timestamp),
-    })) || []
-
-  useEffect(() => {
-    if (data?.conversationId && !conversationId) {
-      setConversationId(data.conversationId)
-    }
-  }, [data, conversationId])
-
-  const [input, setInput] = useState("")
-  const [isTyping, setIsTyping] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [input, setInput] = useState("")
+
+  const { messages, sendMessage, status } = useChat({
+    onError: (error) => {
+      console.error("Chat error:", error)
+    },
+  })
+
+  const isLoading = status === "streaming" || status === "submitted"
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || isLoading) return
+
+    const messageText = input.trim()
+
+    // Clear input immediately for better UX
+    setInput("")
+
+    // Send message
+    sendMessage({
+      role: "user",
+      parts: [{ type: "text", text: messageText }],
+    })
+
+    // Refocus input after sending
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInput(e.target.value)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e as unknown as FormEvent)
+    }
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
+  // Auto-scroll when messages change
   useEffect(() => {
     scrollToBottom()
   }, [messages])
 
-  const handleSend = async () => {
-    if (!input.trim() || !user) return
-
-    const userMessageContent = input
-    setInput("")
-    setIsTyping(true)
-
-    try {
-      const response = await fetch("/api/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId,
-          userId: user.id,
-          role: "user",
-          content: userMessageContent,
-        }),
-      })
-
-      const result = await response.json()
-      setConversationId(result.conversationId)
-
-      setTimeout(async () => {
-        await fetch("/api/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversationId: result.conversationId,
-            userId: user.id,
-            role: "assistant",
-            content:
-              "Thank you for sharing that with me. I'm here to listen and support you. Remember, every step forward, no matter how small, is progress worth celebrating.",
-          }),
-        })
-
-        mutate()
-        setIsTyping(false)
-      }, 1500)
-    } catch (error) {
-      console.error("[v0] Error sending message:", error)
-      setIsTyping(false)
+  // Auto-scroll when loading state changes
+  useEffect(() => {
+    if (isLoading) {
+      scrollToBottom()
     }
-  }
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
+  }, [isLoading])
 
   return (
     <div className="flex h-full flex-col">
@@ -161,35 +122,54 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-4xl space-y-6">
-          {messages.map((message, index) => (
-            <div
-              key={message.id}
-              className={cn(
-                "flex animate-in fade-in slide-in-from-bottom-4 duration-500",
-                message.role === "user" ? "justify-end" : "justify-start",
-              )}
-              style={{ animationDelay: `${index * 50}ms` }}
-            >
-              <div
-                className={cn(
-                  "glass max-w-[80%] rounded-2xl px-6 py-4 shadow-lg transition-all hover:shadow-xl md:max-w-[70%]",
-                  message.role === "assistant"
-                    ? "rounded-tl-sm bg-[#3B82F6]/10 text-foreground"
-                    : "rounded-tr-sm bg-muted/50 text-foreground",
-                )}
-              >
-                <p className="text-pretty leading-relaxed">{message.content}</p>
-                <time className="mt-2 block text-xs text-muted-foreground">
-                  {message.timestamp.toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </time>
+          {messages.length === 0 && (
+            <div className="flex items-center justify-center py-12">
+              <div className="glass max-w-md rounded-2xl px-8 py-6 text-center">
+                <Sparkles className="mx-auto mb-4 h-12 w-12 text-[#3B82F6]" />
+                <h2 className="mb-2 text-xl font-semibold text-foreground">
+                  Welcome to Next Moment
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  I'm here to support you on your journey. Share what's on your mind, and let's talk.
+                </p>
               </div>
             </div>
-          ))}
+          )}
 
-          {isTyping && (
+          {messages.map((message, index) => {
+            const isLastMessage = index === messages.length - 1
+            const isStreaming = isLastMessage && status === "streaming"
+
+            return (
+              <div
+                key={message.id}
+                className={cn(
+                  "flex animate-in fade-in slide-in-from-bottom-4 duration-300",
+                  message.role === "user" ? "justify-end" : "justify-start",
+                )}
+              >
+                <div
+                  className={cn(
+                    "glass max-w-[80%] rounded-2xl px-6 py-4 shadow-lg transition-all hover:shadow-xl md:max-w-[70%]",
+                    message.role === "assistant"
+                      ? "rounded-tl-sm bg-[#3B82F6]/10 text-foreground"
+                      : "rounded-tr-sm bg-muted/50 text-foreground",
+                    isStreaming && "animate-pulse",
+                  )}
+                >
+                  <p className="text-pretty leading-relaxed whitespace-pre-wrap">
+                    {message.parts
+                      .filter((part) => part.type === "text")
+                      .map((part, idx) => (
+                        <span key={idx}>{part.type === "text" ? part.text : ""}</span>
+                      ))}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+
+          {status === "submitted" && (
             <div className="flex animate-in fade-in slide-in-from-bottom-4 justify-start duration-300">
               <div className="glass max-w-[80%] rounded-2xl rounded-tl-sm bg-[#3B82F6]/10 px-6 py-4 shadow-lg md:max-w-[70%]">
                 <div className="flex gap-1.5">
@@ -206,25 +186,27 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
       </div>
 
       <div className="glass-strong border-t border-border/50 px-4 py-4">
-        <div className="mx-auto flex max-w-4xl gap-3">
+        <form onSubmit={handleSubmit} className="mx-auto flex max-w-4xl gap-3">
           <Input
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
             placeholder="Share what's on your mind..."
             className="h-14 flex-1 rounded-2xl border-border/50 bg-background/50 px-6 text-base shadow-sm transition-all focus:shadow-md"
             aria-label="Message input"
+            disabled={isLoading}
+            autoFocus
           />
           <Button
-            onClick={handleSend}
-            disabled={!input.trim()}
+            type="submit"
+            disabled={!input.trim() || isLoading}
             className="h-14 w-14 rounded-2xl bg-gradient-to-br from-[#3B82F6] to-[#10B981] text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl disabled:opacity-50 disabled:hover:scale-100"
             aria-label="Send message"
           >
             <Send className="h-5 w-5" />
           </Button>
-        </div>
+        </form>
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChatInterface } from "./chat-interface"
+import { ChatInterface } from "./chat-interface-ai"
 import { CrisisButton } from "./crisis-button"
 import { MorningCheckIn } from "./morning-check-in"
 import { ProgressGarden } from "./progress-garden"

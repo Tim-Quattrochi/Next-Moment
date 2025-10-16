@@ -1,17 +1,7 @@
-import { stackServerApp } from "@/stack"
-import { RecoveryCompanion } from "@/components/recovery-companion"
-import { redirect } from "next/navigation"
+"use client"
 
-export default async function Home() {
-  const user = await stackServerApp.getUser()
+import Hero from "@/components/hero";
 
-  if (!user) {
-    redirect("/handler/sign-in")
-  }
-
-  return (
-    <main className="h-screen w-full">
-      <RecoveryCompanion />
-    </main>
-  )
+export default function LandingPage() {
+  return <Hero />;
 }
