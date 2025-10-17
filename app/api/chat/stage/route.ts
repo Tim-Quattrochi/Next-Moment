@@ -19,10 +19,7 @@ export async function GET() {
     const userId = user.id
 
     // Get the user's most recent conversation
-    const conversations = await sql<{
-      id: number
-      stage: RecoveryStage
-    }[]>`
+    const conversations = await sql`
       SELECT id, stage
       FROM conversations
       WHERE user_id = ${userId}
