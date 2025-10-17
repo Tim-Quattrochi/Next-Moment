@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useUser } from "@/lib/hooks/use-user"
 import { useChat } from "@ai-sdk/react"
+import { motion } from "framer-motion"
 import { MarkdownMessage } from "@/components/markdown-message"
 import { StageProgressIndicator } from "@/components/stage-progress-indicator"
 import { getStageConfig, isIconActiveForStage, getSuggestedReplyIcon, getSuggestedReplyColor } from "@/lib/stage-ui-config"
@@ -37,6 +38,9 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   ])
   const fetchStageTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastStageFetchRef = useRef<number>(0)
+  const [stageFetchError, setStageFetchError] = useState(false)
+  const [previousStage, setPreviousStage] = useState<RecoveryStage | null>(null)
+  const [justTransitioned, setJustTransitioned] = useState(false)
 
   const { messages, sendMessage, status } = useChat({
     onError: (error) => {
@@ -59,7 +63,7 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
       }
 
       // After the AI finishes responding, fetch the latest stage info
-      // Add a small delay to ensure messages are fully saved to database
+      // Increased delay to 1500ms to ensure DB writes complete and AI detection finishes
       fetchStageTimeoutRef.current = setTimeout(async () => {
         lastStageFetchRef.current = Date.now()
 
@@ -75,22 +79,43 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
 
           if (response.ok) {
             const data = await response.json()
-            if (data.stage) {
+
+            // Check if stage changed (transition occurred)
+            if (data.stage && data.stage !== currentStage) {
+              setPreviousStage(currentStage)
+              setCurrentStage(data.stage)
+              setJustTransitioned(true)
+
+              // Clear transition animation after 3 seconds
+              setTimeout(() => setJustTransitioned(false), 3000)
+            } else if (data.stage) {
               setCurrentStage(data.stage)
             }
+
             if (data.suggestedReplies) {
               setSuggestedReplies(data.suggestedReplies)
             }
             if (data.conversationId) {
               setConversationId(data.conversationId)
             }
+
+            // Clear any previous errors
+            setStageFetchError(false)
           } else {
             console.error("Failed to fetch stage info, status:", response.status)
+            setStageFetchError(true)
+
+            // Auto-clear error after 5 seconds
+            setTimeout(() => setStageFetchError(false), 5000)
           }
         } catch (error) {
           console.error("Failed to fetch stage info:", error)
+          setStageFetchError(true)
+
+          // Auto-clear error after 5 seconds
+          setTimeout(() => setStageFetchError(false), 5000)
         }
-      }, 500)
+      }, 1500)
     },
   })
 
@@ -326,6 +351,85 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
 
       {/* Stage Progress Indicator */}
       <StageProgressIndicator currentStage={currentStage} />
+
+      {/* Stage Transition Celebration */}
+      {justTransitioned && previousStage && (
+        <motion.div
+          initial={{ opacity: 0, y: -20, scale: 0.9 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -20, scale: 0.9 }}
+          className="mx-auto max-w-4xl px-6 py-3"
+        >
+          <div
+            className="glass rounded-2xl px-6 py-4 text-center shadow-lg border-2"
+            style={{
+              borderColor: stageConfig.color,
+              background: `linear-gradient(135deg, ${stageConfig.color}15, ${stageConfig.color}05)`,
+              boxShadow: `0 0 30px ${stageConfig.color}30`,
+            }}
+          >
+            <div className="flex items-center justify-center gap-3">
+              <motion.div
+                animate={{
+                  rotate: [0, 10, -10, 10, 0],
+                  scale: [1, 1.2, 1.2, 1.2, 1],
+                }}
+                transition={{ duration: 0.6 }}
+                className="text-2xl"
+              >
+                🎉
+              </motion.div>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: stageConfig.color }}>
+                  Moving to {stageConfig.name}!
+                </p>
+                <p className="text-xs text-muted-foreground">{stageConfig.subtitle}</p>
+              </div>
+              <motion.div
+                animate={{
+                  rotate: [0, -10, 10, -10, 0],
+                  scale: [1, 1.2, 1.2, 1.2, 1],
+                }}
+                transition={{ duration: 0.6 }}
+                className="text-2xl"
+              >
+                ✨
+              </motion.div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Error Banner */}
+      {stageFetchError && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          className="mx-auto max-w-4xl px-6 py-2"
+        >
+          <div className="glass rounded-lg px-4 py-3 bg-yellow-50/50 border border-yellow-200/50 dark:bg-yellow-900/20 dark:border-yellow-700/50">
+            <div className="flex items-center gap-2">
+              <span className="text-yellow-600 dark:text-yellow-400">⚠️</span>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                  Having trouble syncing progress
+                </p>
+                <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                  Don't worry, your conversation is saved and will sync automatically.
+                </p>
+              </div>
+              <button
+                onClick={() => setStageFetchError(false)}
+                className="text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-4xl space-y-6">
