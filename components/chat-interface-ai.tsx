@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useUser } from "@/lib/hooks/use-user"
 import { useChat } from "@ai-sdk/react"
+import { MarkdownMessage } from "@/components/markdown-message"
 
 interface SuggestedReply {
   text: string
@@ -24,6 +25,8 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [input, setInput] = useState("")
+  const [currentStage, setCurrentStage] = useState<string>("greeting")
+  const [conversationId, setConversationId] = useState<number | null>(null)
   const [suggestedReplies, setSuggestedReplies] = useState<SuggestedReply[]>([
     { text: "Yes, let's check in", type: "quick" },
     { text: "Tell me more about how this works", type: "detailed" },
@@ -33,6 +36,35 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   const { messages, sendMessage, status } = useChat({
     onError: (error) => {
       console.error("Chat error:", error)
+    },
+    onFinish: async () => {
+      // After the AI finishes responding, fetch the latest stage info
+      // Add a small delay to ensure messages are fully saved to database
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      try {
+        const response = await fetch("/api/chat/stage", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          if (data.stage) {
+            setCurrentStage(data.stage)
+          }
+          if (data.suggestedReplies) {
+            setSuggestedReplies(data.suggestedReplies)
+          }
+          if (data.conversationId) {
+            setConversationId(data.conversationId)
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch stage info:", error)
+      }
     },
   })
 
@@ -47,10 +79,12 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
     // Clear input immediately for better UX
     setInput("")
 
-    // Send message
+    // Send message with conversationId if available
     sendMessage({
       role: "user",
       parts: [{ type: "text", text: messageText }],
+    }, {
+      body: conversationId ? { conversationId } : undefined,
     })
 
     // Refocus input after sending
@@ -60,47 +94,14 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   const handleSuggestedReplyClick = (replyText: string) => {
     if (isLoading) return
 
-    // Send the suggested reply as a message
+    // Send the suggested reply as a message with conversationId if available
     sendMessage({
       role: "user",
       parts: [{ type: "text", text: replyText }],
+    }, {
+      body: conversationId ? { conversationId } : undefined,
     })
   }
-
-  // Update suggested replies based on conversation progress
-  // This is a simple client-side simulation until we can properly access response headers
-  useEffect(() => {
-    if (messages.length === 0) {
-      // Greeting stage
-      setSuggestedReplies([
-        { text: "Yes, let's check in", type: "quick" },
-        { text: "Tell me more about how this works", type: "detailed" },
-        { text: "I'm ready to start", type: "quick" },
-      ])
-    } else if (messages.length <= 3) {
-      // Check-in stage
-      setSuggestedReplies([
-        { text: "I'm feeling calm today", type: "quick" },
-        { text: "I slept well, about 4/5", type: "quick" },
-        { text: "My energy level is 3/5", type: "quick" },
-        { text: "I want to stay focused and positive today", type: "detailed" },
-      ])
-    } else if (messages.length <= 6) {
-      // Journal prompt stage
-      setSuggestedReplies([
-        { text: "I'd like to journal about today", type: "quick" },
-        { text: "I'm grateful for my progress", type: "detailed" },
-        { text: "Let me reflect on my challenges", type: "detailed" },
-      ])
-    } else {
-      // Affirmation / reflection stage
-      setSuggestedReplies([
-        { text: "Thank you, that means a lot", type: "quick" },
-        { text: "I've noticed positive changes", type: "detailed" },
-        { text: "Tell me more", type: "detailed" },
-      ])
-    }
-  }, [messages.length])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInput(e.target.value)
@@ -116,6 +117,31 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
+
+  // Fetch initial stage on mount
+  useEffect(() => {
+    const fetchInitialStage = async () => {
+      try {
+        const response = await fetch("/api/chat/stage")
+        if (response.ok) {
+          const data = await response.json()
+          if (data.stage) {
+            setCurrentStage(data.stage)
+          }
+          if (data.suggestedReplies) {
+            setSuggestedReplies(data.suggestedReplies)
+          }
+          if (data.conversationId) {
+            setConversationId(data.conversationId)
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch initial stage:", error)
+      }
+    }
+
+    fetchInitialStage()
+  }, [])
 
   // Auto-scroll when messages change
   useEffect(() => {
@@ -212,13 +238,22 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
                     isStreaming && "animate-pulse",
                   )}
                 >
-                  <p className="text-pretty leading-relaxed whitespace-pre-wrap">
-                    {message.parts
-                      .filter((part) => part.type === "text")
-                      .map((part, idx) => (
-                        <span key={idx}>{part.type === "text" ? part.text : ""}</span>
-                      ))}
-                  </p>
+                  {message.role === "assistant" ? (
+                    <MarkdownMessage
+                      content={message.parts
+                        .filter((part) => part.type === "text")
+                        .map((part) => (part.type === "text" ? part.text : ""))
+                        .join("")}
+                    />
+                  ) : (
+                    <p className="text-pretty leading-relaxed whitespace-pre-wrap">
+                      {message.parts
+                        .filter((part) => part.type === "text")
+                        .map((part, idx) => (
+                          <span key={idx}>{part.type === "text" ? part.text : ""}</span>
+                        ))}
+                    </p>
+                  )}
                 </div>
               </div>
             )

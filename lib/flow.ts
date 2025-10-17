@@ -233,7 +233,8 @@ export function getNextStage(currentStage: RecoveryStage): RecoveryStage {
 export function shouldTransitionStage(
   stage: RecoveryStage,
   messageCount: number,
-  lastMessage: string
+  lastMessage: string,
+  allUserMessages?: string[]
 ): boolean {
   const lowerMessage = lastMessage.toLowerCase();
 
@@ -242,42 +243,60 @@ export function shouldTransitionStage(
       return messageCount >= 1;
 
     case "check_in":
-      return (
-        messageCount >= 3 &&
-        (lowerMessage.includes("feeling") ||
-          lowerMessage.includes("sleep") ||
-          lowerMessage.includes("energy") ||
-          lowerMessage.includes("intention"))
-      );
+      // Check if ALL check-in components have been discussed
+      if (messageCount < 4) return false;
+
+      const allMessages = (allUserMessages || [lastMessage]).join(" ").toLowerCase();
+
+      // Must have all 4 components answered
+      const hasMood = allMessages.match(/(?:i'm feeling|feeling|mood|feel)\s+(?:calm|happy|anxious|sad|motivated|tired|stressed|hopeful|frustrated|peaceful|good|great|okay|fine|positive)/i);
+      const hasSleep = allMessages.match(/sleep\s*(?:quality|was|well|about)?\s*(?:\d|good|bad|okay)/i);
+      const hasEnergy = allMessages.match(/energy\s*(?:level|is)?\s*(?:\d|high|low|good|great|okay)/i);
+      const hasIntention = allMessages.match(/(?:intention|want to|goal|focus|stay|plan to)/i);
+
+      return !!(hasMood && hasSleep && hasEnergy && hasIntention);
 
     case "journal_prompt":
-      return (
-        messageCount >= 2 &&
-        (lowerMessage.includes("journal") ||
-          lowerMessage.includes("write") ||
-          lowerMessage.includes("grateful") ||
-          lowerMessage.includes("reflect"))
-      );
+      // Only transition if user explicitly engages with or declines journaling
+      if (messageCount < 2) return false;
+
+      const explicitlyEngaged = lowerMessage.match(/yes|sure|okay|let'?s|i'?d like to journal|i'?ll journal|sounds good/i);
+      const explicitlyDeclined = lowerMessage.match(/no|skip|not now|maybe later|not right now|don'?t want to/i);
+
+      return !!(explicitlyEngaged || explicitlyDeclined);
 
     case "affirmation":
-      return messageCount >= 1;
+      // Only transition after user acknowledges the affirmation (need at least 2 exchanges)
+      if (messageCount < 2) return false;
+
+      const acknowledged = lowerMessage.match(/thank|appreciate|needed|helps|feel better|means a lot/i);
+      return !!acknowledged;
 
     case "reflection":
-      return (
-        messageCount >= 2 &&
-        (lowerMessage.includes("growth") ||
-          lowerMessage.includes("change") ||
-          lowerMessage.includes("learn") ||
-          lowerMessage.includes("progress"))
+      // Only transition when user has shared meaningful reflections
+      // Require more exchanges and avoid triggering on first mention of keywords
+      if (messageCount < 3) return false;
+
+      // Look for deeper engagement, not just keyword mentions
+      const sharedDeepReflection = (
+        lowerMessage.length > 50 && // Longer, more thoughtful responses
+        (lowerMessage.includes("notice") ||
+         lowerMessage.includes("realize") ||
+         lowerMessage.includes("learned") ||
+         lowerMessage.includes("appreciate"))
       );
 
+      // Only transition if user seems ready to move on
+      const readyToProgress = lowerMessage.match(/what'?s next|milestone|track progress|see my progress|ready to move/i);
+
+      return !!(sharedDeepReflection && readyToProgress);
+
     case "milestone_review":
-      return (
-        messageCount >= 2 &&
-        (lowerMessage.includes("milestone") ||
-          lowerMessage.includes("goal") ||
-          lowerMessage.includes("achievement"))
-      );
+      // Only transition back to check_in when user indicates they're done or ready for next check-in
+      if (messageCount < 2) return false;
+
+      const readyForNextCheckIn = lowerMessage.match(/done|next|tomorrow|later|check.?in|how am i doing/i);
+      return !!readyForNextCheckIn;
 
     default:
       return false;
@@ -349,6 +368,80 @@ export function getSuggestedRepliesForStage(
       ];
 
     case "check_in":
+      // Get the last AI message to see what it's asking about
+      const lastAIMessage = context.recentMessages
+        .filter(m => m.role === "assistant")
+        .slice(-1)[0]?.content.toLowerCase() || "";
+
+      const userMessages = context.recentMessages
+        .filter(m => m.role === "user")
+        .map(m => m.content.toLowerCase())
+        .join(" ");
+
+      // Check what's been answered by the user
+      const hasMood = userMessages.match(/(?:i'm feeling|feeling|mood|feel)\s+(?:calm|happy|anxious|sad|motivated|tired|stressed|hopeful|frustrated|peaceful)/i);
+      const hasSleep = userMessages.match(/sleep\s*(?:quality|was|well|about)?\s*(?:\d|good|bad|okay)/i);
+      const hasEnergy = userMessages.match(/energy\s*(?:level|is)?\s*(?:\d|high|low|good)/i);
+      const hasIntention = userMessages.match(/(?:intention|want to|goal|focus|stay)/i);
+
+      // Check what the AI is currently asking about
+      const askingAboutMood = lastAIMessage.includes("mood") || lastAIMessage.includes("feeling");
+      const askingAboutSleep = lastAIMessage.includes("sleep");
+      const askingAboutEnergy = lastAIMessage.includes("energy");
+      const askingAboutIntention = lastAIMessage.includes("intention") || lastAIMessage.includes("goal");
+      const askingAboutJournal = lastAIMessage.includes("journal") || lastAIMessage.includes("reflect");
+
+      // If all check-in data has been gathered and AI is transitioning to journaling
+      if (hasMood && hasSleep && hasEnergy && hasIntention && askingAboutJournal) {
+        return [
+          { text: "Yes, let's journal about it", type: "quick" },
+          { text: "I'd like to reflect more on that", type: "detailed" },
+          { text: "That sounds like a good plan", type: "quick" },
+          { text: "Tell me more about journaling", type: "detailed" },
+        ];
+      }
+
+      // If AI is asking about mood, suggest mood responses
+      if (askingAboutMood && !hasMood) {
+        return [
+          { text: "I'm feeling calm today", type: "quick" },
+          { text: "I'm feeling motivated", type: "quick" },
+          { text: "I'm feeling a bit anxious", type: "quick" },
+          { text: "I'm feeling hopeful and positive", type: "detailed" },
+        ];
+      }
+
+      // If AI is asking about energy, suggest energy responses
+      if (askingAboutEnergy && !hasEnergy) {
+        return [
+          { text: "My energy level is 3/5", type: "quick" },
+          { text: "My energy is about 4/5", type: "quick" },
+          { text: "I'm feeling pretty energized, 5/5", type: "quick" },
+          { text: "My energy is low today, about 2/5", type: "quick" },
+        ];
+      }
+
+      // If AI is asking about sleep, suggest sleep responses
+      if (askingAboutSleep && !hasSleep) {
+        return [
+          { text: "I slept well, about 4/5", type: "quick" },
+          { text: "I got decent sleep, 3/5", type: "quick" },
+          { text: "I didn't sleep great, 2/5", type: "quick" },
+          { text: "I had amazing sleep, 5/5!", type: "quick" },
+        ];
+      }
+
+      // If AI is asking about intentions, suggest intention responses
+      if (askingAboutIntention && !hasIntention) {
+        return [
+          { text: "I want to stay focused and positive today", type: "detailed" },
+          { text: "I want to be productive today", type: "quick" },
+          { text: "I want to practice self-care", type: "detailed" },
+          { text: "I want to stay grounded and present", type: "detailed" },
+        ];
+      }
+
+      // Default check-in suggestions (show a mix)
       return [
         { text: "I'm feeling calm today", type: "quick" },
         { text: "I slept well, about 4/5", type: "quick" },
@@ -372,22 +465,85 @@ export function getSuggestedRepliesForStage(
       ];
 
     case "reflection":
+      // Check what the AI is asking about
+      const reflectionLastAI = context.recentMessages
+        .filter(m => m.role === "assistant")
+        .slice(-1)[0]?.content.toLowerCase() || "";
+
+      const askingAboutChanges = reflectionLastAI.includes("changes") || reflectionLastAI.includes("notice");
+      const askingAboutHabits = reflectionLastAI.includes("habit") || reflectionLastAI.includes("practice");
+      const askingAboutPerspective = reflectionLastAI.includes("perspective") || reflectionLastAI.includes("shifted");
+      const askingAboutAppreciation = reflectionLastAI.includes("appreciate") || reflectionLastAI.includes("learning");
+
+      if (askingAboutChanges) {
+        return [
+          { text: "I've noticed I'm more patient with myself", type: "detailed" },
+          { text: "I'm communicating better", type: "quick" },
+          { text: "My mindset has shifted positively", type: "detailed" },
+          { text: "I feel more resilient", type: "quick" },
+        ];
+      }
+
+      if (askingAboutHabits) {
+        return [
+          { text: "Daily check-ins have been really helpful", type: "detailed" },
+          { text: "Journaling helps me process", type: "quick" },
+          { text: "Setting intentions keeps me focused", type: "detailed" },
+          { text: "Taking time to reflect", type: "quick" },
+        ];
+      }
+
+      if (askingAboutAppreciation) {
+        return [
+          { text: "I'm learning to appreciate myself more", type: "detailed" },
+          { text: "I appreciate my resilience", type: "quick" },
+          { text: "I value my progress, even small steps", type: "detailed" },
+          { text: "I'm proud of my commitment", type: "quick" },
+        ];
+      }
+
+      // Default reflection suggestions
       return [
         { text: "I've noticed positive changes", type: "detailed" },
         { text: "My habits are improving", type: "quick" },
         { text: "I'm learning to appreciate myself more", type: "detailed" },
-        { text: "Let's move on", type: "quick" },
+        { text: "I'd like to talk more about this", type: "quick" },
       ];
 
     case "milestone_review":
+      const milestoneLastAI = context.recentMessages
+        .filter(m => m.role === "assistant")
+        .slice(-1)[0]?.content.toLowerCase() || "";
+
+      const askingToShowProgress = milestoneLastAI.includes("milestone") || milestoneLastAI.includes("progress");
+      const askingAboutProud = milestoneLastAI.includes("proud") || milestoneLastAI.includes("achievement");
+      const askingAboutNext = milestoneLastAI.includes("next") || milestoneLastAI.includes("goal");
+
+      if (askingToShowProgress && context.activeMilestones.length > 0) {
+        return [
+          { text: "Yes, show me my milestones", type: "quick" },
+          { text: "I'd love to see my progress", type: "quick" },
+          { text: "What have I accomplished?", type: "detailed" },
+        ];
+      }
+
+      if (askingAboutProud) {
+        return [
+          { text: "I'm proud of what I've achieved", type: "detailed" },
+          { text: "I'm proud of staying consistent", type: "quick" },
+          { text: "I'm proud of not giving up", type: "detailed" },
+        ];
+      }
+
       if (context.activeMilestones.length > 0) {
         return [
           { text: "Show me my progress", type: "quick" },
           { text: "I'm proud of what I've achieved", type: "detailed" },
           { text: "What should I work on next?", type: "detailed" },
-          { text: "Let's set a new goal", type: "quick" },
+          { text: "Let's do another check-in", type: "quick" },
         ];
       }
+
       return [
         { text: "Help me set my first goal", type: "quick" },
         { text: "What milestones can I track?", type: "detailed" },

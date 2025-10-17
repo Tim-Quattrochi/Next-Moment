@@ -74,6 +74,9 @@ export async function POST(req: Request) {
 
     let nextStage = conversation.stage
 
+    let updatedContext = context
+    let suggestedReplies = getSuggestedRepliesForStage(nextStage, context)
+
     const result = streamText({
       model: google("gemini-2.5-flash"),
       system: systemPrompt,
@@ -87,11 +90,20 @@ export async function POST(req: Request) {
           userMessageContent
         )
 
+        // Collect all user messages for stage transition check
+        const allUserMessages = [
+          ...(context.recentMessages || [])
+            .filter((m) => m.role === "user")
+            .map((m) => m.content),
+          userMessageContent,
+        ];
+
         if (
           shouldTransitionStage(
             conversation.stage,
             stageMessageCount + 1,
-            userMessageContent
+            userMessageContent,
+            allUserMessages
           )
         ) {
           nextStage = await progressConversationStage(conversation.id, conversation.stage)
@@ -106,10 +118,18 @@ export async function POST(req: Request) {
         }
 
         await checkAndCreateAutoMilestones(userId)
+
+        // Rebuild context with the newly saved messages
+        updatedContext = await buildConversationContext(
+          userId,
+          conversation.id,
+          nextStage
+        )
+
+        // Update suggested replies with fresh context
+        suggestedReplies = getSuggestedRepliesForStage(nextStage, updatedContext)
       },
     })
-
-    const suggestedReplies = getSuggestedRepliesForStage(nextStage, context)
 
     return result.toUIMessageStreamResponse({
       headers: {
