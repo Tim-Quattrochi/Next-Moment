@@ -35,39 +35,62 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
     { text: "Tell me more about how this works", type: "detailed" },
     { text: "I'm ready to start", type: "quick" },
   ])
+  const fetchStageTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastStageFetchRef = useRef<number>(0)
 
   const { messages, sendMessage, status } = useChat({
     onError: (error) => {
       console.error("Chat error:", error)
     },
     onFinish: async () => {
+      // Clear any pending fetch timeout
+      if (fetchStageTimeoutRef.current) {
+        clearTimeout(fetchStageTimeoutRef.current)
+      }
+
+      // Debounce: only fetch if at least 1 second has passed since last fetch
+      const now = Date.now()
+      const timeSinceLastFetch = now - lastStageFetchRef.current
+      const minFetchInterval = 1000 // 1 second minimum between fetches
+
+      if (timeSinceLastFetch < minFetchInterval) {
+        console.log(`Skipping stage fetch - only ${timeSinceLastFetch}ms since last fetch`)
+        return
+      }
+
       // After the AI finishes responding, fetch the latest stage info
       // Add a small delay to ensure messages are fully saved to database
-      await new Promise(resolve => setTimeout(resolve, 500))
+      fetchStageTimeoutRef.current = setTimeout(async () => {
+        lastStageFetchRef.current = Date.now()
 
-      try {
-        const response = await fetch("/api/chat/stage", {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        })
+        try {
+          const response = await fetch("/api/chat/stage", {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            credentials: 'include',
+            cache: 'no-cache'
+          })
 
-        if (response.ok) {
-          const data = await response.json()
-          if (data.stage) {
-            setCurrentStage(data.stage)
+          if (response.ok) {
+            const data = await response.json()
+            if (data.stage) {
+              setCurrentStage(data.stage)
+            }
+            if (data.suggestedReplies) {
+              setSuggestedReplies(data.suggestedReplies)
+            }
+            if (data.conversationId) {
+              setConversationId(data.conversationId)
+            }
+          } else {
+            console.error("Failed to fetch stage info, status:", response.status)
           }
-          if (data.suggestedReplies) {
-            setSuggestedReplies(data.suggestedReplies)
-          }
-          if (data.conversationId) {
-            setConversationId(data.conversationId)
-          }
+        } catch (error) {
+          console.error("Failed to fetch stage info:", error)
         }
-      } catch (error) {
-        console.error("Failed to fetch stage info:", error)
-      }
+      }, 500)
     },
   })
 
@@ -121,12 +144,28 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
-  // Fetch initial stage on mount
+  // Fetch initial stage on mount - only once
   useEffect(() => {
+    let isMounted = true
+    let hasFetched = false
+
     const fetchInitialStage = async () => {
+      // Only fetch if user is authenticated and we haven't fetched yet
+      if (!user || hasFetched) {
+        if (!user) {
+          console.log("User not authenticated, skipping stage fetch")
+        }
+        return
+      }
+
+      hasFetched = true
+
       try {
-        const response = await fetch("/api/chat/stage")
-        if (response.ok) {
+        const response = await fetch("/api/chat/stage", {
+          credentials: 'include',
+          cache: 'no-cache'
+        })
+        if (response.ok && isMounted) {
           const data = await response.json()
           if (data.stage) {
             setCurrentStage(data.stage)
@@ -137,14 +176,22 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
           if (data.conversationId) {
             setConversationId(data.conversationId)
           }
+        } else if (isMounted) {
+          console.error("Failed to fetch stage, status:", response.status)
         }
       } catch (error) {
-        console.error("Failed to fetch initial stage:", error)
+        if (isMounted) {
+          console.error("Failed to fetch initial stage:", error)
+        }
       }
     }
 
     fetchInitialStage()
-  }, [])
+
+    return () => {
+      isMounted = false
+    }
+  }, [user?.id])
 
   // Auto-scroll when messages change
   useEffect(() => {
@@ -157,6 +204,15 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
       scrollToBottom()
     }
   }, [isLoading])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (fetchStageTimeoutRef.current) {
+        clearTimeout(fetchStageTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const stageConfig = getStageConfig(currentStage)
 
