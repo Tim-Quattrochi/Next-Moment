@@ -457,12 +457,30 @@ export function getSuggestedRepliesForStage(
         { text: "Skip journaling for now", type: "quick" },
       ];
 
-    case "affirmation":
+    case "affirmation": {
+      const lastAIMessage = context.recentMessages
+        .filter(m => m.role === "assistant")
+        .slice(-1)[0]?.content.toLowerCase() || "";
+
+      if (
+        lastAIMessage.includes("goal") ||
+        lastAIMessage.includes("step") ||
+        lastAIMessage.includes("focused")
+      ) {
+        return [
+          { text: "One goal I'm focused on is...", type: "detailed" },
+          { text: "A small step I can take today is...", type: "detailed" },
+          { text: "Let's talk about my goals", type: "quick" },
+          { text: "I'm feeling motivated to work on my goals", type: "quick" },
+        ];
+      }
+
       return [
         { text: "Thank you, that means a lot", type: "quick" },
         { text: "I needed to hear that", type: "quick" },
-        { text: "Tell me more", type: "detailed" },
+        { text: "I appreciate your support", type: "quick" },
       ];
+    }
 
     case "reflection":
       // Check what the AI is asking about
