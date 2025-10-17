@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils"
 import { useUser } from "@/lib/hooks/use-user"
 import { useChat } from "@ai-sdk/react"
 import { MarkdownMessage } from "@/components/markdown-message"
+import { StageProgressIndicator } from "@/components/stage-progress-indicator"
+import { getStageConfig, isIconActiveForStage, getSuggestedReplyIcon, getSuggestedReplyColor } from "@/lib/stage-ui-config"
+import type { RecoveryStage } from "@/lib/types"
 
 interface SuggestedReply {
   text: string
@@ -25,7 +28,7 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [input, setInput] = useState("")
-  const [currentStage, setCurrentStage] = useState<string>("greeting")
+  const [currentStage, setCurrentStage] = useState<RecoveryStage>("greeting")
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [suggestedReplies, setSuggestedReplies] = useState<SuggestedReply[]>([
     { text: "Yes, let's check in", type: "quick" },
@@ -155,17 +158,30 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
     }
   }, [isLoading])
 
+  const stageConfig = getStageConfig(currentStage)
+
   return (
     <div className="flex h-full flex-col">
       <header className="glass-strong border-b border-border/50 px-6 py-4">
         <div className="mx-auto flex max-w-4xl items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#3B82F6] to-[#10B981]">
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br transition-all duration-300"
+              style={{
+                background: `linear-gradient(135deg, ${stageConfig.color}, ${stageConfig.color}dd)`,
+                boxShadow: `0 0 20px ${stageConfig.color}40`
+              }}
+            >
               <Sparkles className="h-5 w-5 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-semibold text-foreground">Welcome back, {user?.name}</h1>
-              <p className="text-sm text-muted-foreground">Always here for you 24/7</p>
+              <p
+                className="text-sm font-medium transition-colors duration-300"
+                style={{ color: stageConfig.color }}
+              >
+                {stageConfig.subtitle}
+              </p>
             </div>
           </div>
 
@@ -174,32 +190,86 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
               variant="ghost"
               size="icon"
               onClick={() => onNavigate("check-in")}
-              className="h-10 w-10 rounded-full hover:bg-[#3B82F6]/10"
+              className={cn(
+                "h-10 w-10 rounded-full transition-all duration-300",
+                isIconActiveForStage("check-in", currentStage)
+                  ? "bg-[#14B8A6]/20 ring-2 ring-[#14B8A6]/50 shadow-lg hover:bg-[#14B8A6]/30"
+                  : "hover:bg-[#3B82F6]/10"
+              )}
               aria-label="Morning check-in"
+              style={
+                isIconActiveForStage("check-in", currentStage)
+                  ? { boxShadow: "0 0 20px #14B8A640" }
+                  : undefined
+              }
             >
-              <Calendar className="h-5 w-5 text-[#3B82F6]" />
+              <Calendar
+                className={cn(
+                  "h-5 w-5 transition-all duration-300",
+                  isIconActiveForStage("check-in", currentStage)
+                    ? "text-[#14B8A6] animate-pulse"
+                    : "text-[#3B82F6]"
+                )}
+              />
             </Button>
             <Button
               variant="ghost"
               size="icon"
               onClick={() => onNavigate("garden")}
-              className="h-10 w-10 rounded-full hover:bg-[#10B981]/10"
+              className={cn(
+                "h-10 w-10 rounded-full transition-all duration-300",
+                isIconActiveForStage("garden", currentStage)
+                  ? "bg-[#F43F5E]/20 ring-2 ring-[#F43F5E]/50 shadow-lg hover:bg-[#F43F5E]/30"
+                  : "hover:bg-[#10B981]/10"
+              )}
               aria-label="Progress garden"
+              style={
+                isIconActiveForStage("garden", currentStage)
+                  ? { boxShadow: "0 0 20px #F43F5E40" }
+                  : undefined
+              }
             >
-              <Sprout className="h-5 w-5 text-[#10B981]" />
+              <Sprout
+                className={cn(
+                  "h-5 w-5 transition-all duration-300",
+                  isIconActiveForStage("garden", currentStage)
+                    ? "text-[#F43F5E] animate-pulse"
+                    : "text-[#10B981]"
+                )}
+              />
             </Button>
             <Button
               variant="ghost"
               size="icon"
               onClick={() => onNavigate("journal")}
-              className="h-10 w-10 rounded-full hover:bg-[#F59E0B]/10"
+              className={cn(
+                "h-10 w-10 rounded-full transition-all duration-300",
+                isIconActiveForStage("journal", currentStage)
+                  ? "bg-[#F59E0B]/20 ring-2 ring-[#F59E0B]/50 shadow-lg hover:bg-[#F59E0B]/30"
+                  : "hover:bg-[#F59E0B]/10"
+              )}
               aria-label="Journal"
+              style={
+                isIconActiveForStage("journal", currentStage)
+                  ? { boxShadow: "0 0 20px #F59E0B40" }
+                  : undefined
+              }
             >
-              <BookOpen className="h-5 w-5 text-[#F59E0B]" />
+              <BookOpen
+                className={cn(
+                  "h-5 w-5 transition-all duration-300",
+                  isIconActiveForStage("journal", currentStage)
+                    ? "text-[#F59E0B] animate-pulse"
+                    : "text-[#F59E0B]"
+                )}
+              />
             </Button>
           </div>
         </div>
       </header>
+
+      {/* Stage Progress Indicator */}
+      <StageProgressIndicator currentStage={currentStage} />
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-4xl space-y-6">
@@ -279,21 +349,31 @@ export function ChatInterface({ onNavigate }: ChatInterfaceProps) {
         <div className="mx-auto max-w-4xl">
           {/* Suggested Replies */}
           {suggestedReplies.length > 0 && !isLoading && (
-            <div className="mb-4 flex flex-wrap gap-2">
-              {suggestedReplies.map((reply, index) => (
-                <Button
-                  key={index}
-                  variant="outline"
-                  onClick={() => handleSuggestedReplyClick(reply.text)}
-                  className={cn(
-                    "rounded-full border-border/50 bg-background/50 text-sm transition-all hover:scale-105 hover:border-[#3B82F6] hover:bg-[#3B82F6]/10 hover:text-[#3B82F6]",
-                    reply.type === "quick" && "px-4 py-2",
-                    reply.type === "detailed" && "px-5 py-2.5"
-                  )}
-                >
-                  {reply.text}
-                </Button>
-              ))}
+            <div className="mb-4 flex flex-wrap gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              {suggestedReplies.map((reply, index) => {
+                const icon = getSuggestedReplyIcon(reply.text)
+                const colorClass = getSuggestedReplyColor(reply.text, reply.type)
+
+                return (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    onClick={() => handleSuggestedReplyClick(reply.text)}
+                    className={cn(
+                      "rounded-full bg-background/50 text-sm transition-all duration-300 hover:scale-105",
+                      colorClass,
+                      reply.type === "quick" && "px-4 py-2",
+                      reply.type === "detailed" && "px-5 py-2.5"
+                    )}
+                    style={{
+                      animationDelay: `${index * 50}ms`
+                    }}
+                  >
+                    {icon && <span className="mr-1.5">{icon}</span>}
+                    {reply.text}
+                  </Button>
+                )
+              })}
             </div>
           )}
 
