@@ -165,7 +165,7 @@ case "reflection":
 
 ## Testing Scenarios Needed
 
-1. **Full happy path**: greeting → check_in → journal → affirmation → reflection → milestones → back to check_in
+1. **Full happy path**: greeting → check_in → journal → affirmation → reflection → milestones → back to check_in - done for today? still allow user to see journal, garden and chat regularly with AI chat
 2. **User declines journaling**: Should still progress gracefully
 3. **User gives incomplete check-in data**: Should stay in check_in until complete
 4. **User mentions keywords naturally**: Shouldn't trigger premature transitions

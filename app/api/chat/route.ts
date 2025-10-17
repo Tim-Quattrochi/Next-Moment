@@ -10,10 +10,11 @@ import {
   generateConversationTitle,
   updateConversationTitle,
 } from "@/lib/services/conversation"
-import { getSystemPromptForStage, shouldTransitionStage, getSuggestedRepliesForStage } from "@/lib/flow"
-import { parseCheckInFromText, createCheckIn } from "@/lib/services/check-in"
-import { parseJournalFromText, createJournalEntry } from "@/lib/services/journal"
+import { getSystemPromptForStage, getSuggestedRepliesForStage } from "@/lib/flow"
+import { createCheckIn } from "@/lib/services/check-in"
+import { createJournalEntry } from "@/lib/services/journal"
 import { checkAndCreateAutoMilestones } from "@/lib/services/milestone"
+import { shouldTransitionStageAI, extractCheckInDataAI, extractJournalDataAI } from "@/lib/ai-stage-detection"
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_API_KEY || "",
@@ -68,10 +69,6 @@ export async function POST(req: Request) {
 
     const allMessages = [...conversationHistory, ...clientMessages]
 
-    let stageMessageCount = (context.recentMessages || []).filter(
-      (m) => m.role === "user"
-    ).length
-
     let nextStage = conversation.stage
 
     let updatedContext = context
@@ -84,29 +81,36 @@ export async function POST(req: Request) {
       async onFinish({ text }) {
         await saveMessage(conversation.id, "assistant", text)
 
-        await handleStageSpecificActions(
+        // Get fresh context with all messages including the ones just saved
+        const freshContext = await buildConversationContext(
           userId,
-          conversation.stage,
-          userMessageContent
+          conversation.id,
+          conversation.stage
         )
 
-        // Collect all user messages for stage transition check
-        const allUserMessages = [
-          ...(context.recentMessages || [])
-            .filter((m) => m.role === "user")
-            .map((m) => m.content),
-          userMessageContent,
-        ];
+        // Handle stage-specific data extraction using AI
+        await handleStageSpecificActionsAI(
+          userId,
+          conversation.stage,
+          freshContext.recentMessages || []
+        )
 
-        if (
-          shouldTransitionStage(
-            conversation.stage,
-            stageMessageCount + 1,
-            userMessageContent,
-            allUserMessages
-          )
-        ) {
+        // Use AI to determine if stage should transition
+        const userMessageCountInStage = (freshContext.recentMessages || []).filter(
+          (m) => m.role === "user"
+        ).length
+
+        const transitionResult = await shouldTransitionStageAI(
+          conversation.stage,
+          freshContext.recentMessages || [],
+          userMessageCountInStage
+        )
+
+        console.log(`[STAGE TRANSITION CHECK] Stage: ${conversation.stage}, Should Transition: ${transitionResult.shouldTransition}, Reasoning: ${transitionResult.reasoning}`)
+
+        if (transitionResult.shouldTransition) {
           nextStage = await progressConversationStage(conversation.id, conversation.stage)
+          console.log(`[STAGE TRANSITIONED] ${conversation.stage} → ${nextStage}`)
         }
 
         if ((context.recentMessages || []).length <= 2) {
@@ -119,7 +123,7 @@ export async function POST(req: Request) {
 
         await checkAndCreateAutoMilestones(userId)
 
-        // Rebuild context with the newly saved messages
+        // Rebuild context with the newly saved messages and updated stage
         updatedContext = await buildConversationContext(
           userId,
           conversation.id,
@@ -195,28 +199,35 @@ function extractMessageContent(message: { content?: string; parts?: Array<{ type
   )
 }
 
-async function handleStageSpecificActions(
+/**
+ * Handle stage-specific data extraction using AI
+ */
+async function handleStageSpecificActionsAI(
   userId: string,
   stage: string,
-  userMessage: string
+  recentMessages: Array<{ role: string; content: string }>
 ) {
   try {
     if (stage === "check_in") {
-      const checkInData = parseCheckInFromText(userMessage)
+      const checkInData = await extractCheckInDataAI(recentMessages)
       if (checkInData) {
         await createCheckIn(userId, checkInData)
-        console.log(`Check-in created for user ${userId}`)
+        console.log(`[CHECK-IN CREATED] User: ${userId}, Mood: ${checkInData.mood}, Sleep: ${checkInData.sleepQuality}/5, Energy: ${checkInData.energyLevel}/5`)
+      } else {
+        console.log(`[CHECK-IN EXTRACTION] Not enough data yet for user ${userId}`)
       }
     }
 
     if (stage === "journal_prompt") {
-      const journalData = parseJournalFromText(userMessage)
+      const journalData = await extractJournalDataAI(recentMessages)
       if (journalData) {
         await createJournalEntry(userId, journalData)
-        console.log(`Journal entry created for user ${userId}`)
+        console.log(`[JOURNAL CREATED] User: ${userId}, Title: "${journalData.title}", Length: ${journalData.content.length} chars`)
+      } else {
+        console.log(`[JOURNAL EXTRACTION] No journal content detected for user ${userId}`)
       }
     }
   } catch (error) {
-    console.error("Error handling stage-specific actions:", error)
+    console.error("[STAGE-SPECIFIC ACTIONS ERROR]", error)
   }
 }
