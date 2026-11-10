@@ -33,6 +33,9 @@ export function StageProgressIndicator({
             style={{
               borderLeft: `4px solid ${config.color}`,
             }}
+            aria-expanded={isExpanded}
+            aria-controls="journey-stage-map"
+            aria-label="Toggle journey progress details"
             whileTap={{ scale: 0.98 }}
           >
             <div className="flex items-center gap-3">
@@ -42,6 +45,7 @@ export function StageProgressIndicator({
                   background: `linear-gradient(135deg, ${config.color}, ${config.color}dd)`,
                   boxShadow: `0 0 15px ${config.color}40`,
                 }}
+                aria-hidden="true"
               >
                 <div className="h-3 w-3 rounded-full bg-white" />
               </div>
@@ -62,6 +66,16 @@ export function StageProgressIndicator({
             </motion.div>
           </motion.button>
 
+          {/* Accessible progress for screen readers */}
+          <div
+            className="sr-only"
+            role="progressbar"
+            aria-label="Journey progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress}
+          />
+
           {/* Expandable Stage Map for Mobile */}
           <AnimatePresence>
             {isExpanded && (
@@ -71,12 +85,18 @@ export function StageProgressIndicator({
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.3 }}
                 className="overflow-hidden"
+                id="journey-stage-map"
+                role="region"
+                aria-labelledby="journey-stage-map-label"
               >
                 <div className="glass mt-3 rounded-2xl p-4 shadow-lg">
-                  <p className="mb-4 text-center text-xs font-medium text-muted-foreground">
+                  <p
+                    id="journey-stage-map-label"
+                    className="mb-4 text-center text-xs font-medium text-muted-foreground"
+                  >
                     Your Journey Progress
                   </p>
-                  <div className="space-y-3">
+                  <div className="space-y-3" role="list" aria-label="Journey stages">
                     {STAGE_ORDER.map((stage, index) => {
                       const stageConfig = getStageConfig(stage)
                       const isActive = index === currentIndex
@@ -94,6 +114,9 @@ export function StageProgressIndicator({
                             isActive && "bg-muted/50",
                             !isActive && "opacity-60"
                           )}
+                          role="listitem"
+                          aria-current={isActive ? "step" : undefined}
+                          aria-label={`${stageConfig.name}${isActive ? " (current stage)" : isCompleted ? " (completed)" : " (upcoming)"}`}
                         >
                           <div
                             className={cn(
@@ -111,6 +134,7 @@ export function StageProgressIndicator({
                                   }
                                 : undefined
                             }
+                            aria-hidden="true"
                           >
                             {isCompleted ? (
                               <svg
@@ -118,6 +142,7 @@ export function StageProgressIndicator({
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
+                                aria-hidden="true"
                               >
                                 <path
                                   strokeLinecap="round"
@@ -132,6 +157,7 @@ export function StageProgressIndicator({
                                   "h-4 w-4 rounded-full",
                                   isActive ? "bg-white" : "bg-gray-400 dark:bg-gray-600"
                                 )}
+                                aria-hidden="true"
                               />
                             )}
                           </div>
@@ -154,6 +180,7 @@ export function StageProgressIndicator({
                               className="shrink-0 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 px-2 py-1 text-xs font-medium text-white"
                               initial={{ scale: 0 }}
                               animate={{ scale: 1 }}
+                              aria-hidden="true"
                             >
                               Now
                             </motion.div>
@@ -173,6 +200,7 @@ export function StageProgressIndicator({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="mt-3 text-center text-xs text-muted-foreground"
+              aria-live="polite"
             >
               {config.description}
             </motion.p>
@@ -181,7 +209,7 @@ export function StageProgressIndicator({
 
         {/* Desktop Full View (hidden on mobile) */}
         <div className="hidden md:block">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between" role="list" aria-label="Journey stages">
           {STAGE_ORDER.map((stage, index) => {
             const stageConfig = getStageConfig(stage)
             const isActive = index === currentIndex
@@ -189,7 +217,7 @@ export function StageProgressIndicator({
             const isFuture = index > currentIndex
 
             return (
-              <div key={stage} className="flex flex-1 items-center">
+              <div key={stage} className="flex flex-1 items-center" role="listitem" aria-current={isActive ? "step" : undefined}>
                 <div className="relative flex flex-col items-center">
                   <motion.div
                     initial={{ scale: 0.8, opacity: 0 }}
@@ -216,6 +244,7 @@ export function StageProgressIndicator({
                             }
                           : undefined
                       }
+                      aria-hidden="true"
                     >
                       {isCompleted ? (
                         <svg
@@ -223,6 +252,7 @@ export function StageProgressIndicator({
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
+                          aria-hidden="true"
                         >
                           <path
                             strokeLinecap="round"
@@ -237,6 +267,7 @@ export function StageProgressIndicator({
                             "h-3 w-3 rounded-full",
                             isActive ? "bg-white" : "bg-gray-400 dark:bg-gray-600"
                           )}
+                          aria-hidden="true"
                         />
                       )}
                     </div>
@@ -256,6 +287,7 @@ export function StageProgressIndicator({
                           repeat: Number.POSITIVE_INFINITY,
                           ease: "easeInOut",
                         }}
+                        aria-hidden="true"
                       />
                     )}
                   </motion.div>
@@ -269,6 +301,7 @@ export function StageProgressIndicator({
                       !isActive && "text-muted-foreground"
                     )}
                     style={isActive ? { color: stageConfig.color } : undefined}
+                    aria-label={`${stageConfig.name}${isActive ? " (current stage)" : isCompleted ? " (completed)" : " (upcoming)"}`}
                   >
                     {stageConfig.name}
                   </motion.span>
@@ -284,6 +317,7 @@ export function StageProgressIndicator({
                           width: index < currentIndex ? "100%" : "0%",
                         }}
                         transition={{ duration: 0.5, ease: "easeInOut" }}
+                        aria-hidden="true"
                       />
                     </div>
                   </div>
@@ -301,7 +335,9 @@ export function StageProgressIndicator({
           transition={{ duration: 0.3 }}
           className="mt-4 text-center"
         >
-          <p className="text-sm text-muted-foreground">{config.description}</p>
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {config.description}
+          </p>
         </motion.div>
       </div>
     </div>

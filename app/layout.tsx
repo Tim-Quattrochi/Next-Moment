@@ -12,6 +12,8 @@ const inter = Inter({
   variable: "--font-inter",
 })
 
+const hasStackConfig = Boolean(process.env.NEXT_PUBLIC_STACK_PROJECT_ID)
+
 export const metadata: Metadata = {
   title: "Next Moment",
   description: "Always Here for you 24/7 for your recovery journey.",
@@ -26,9 +28,13 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className="font-sans antialiased">
-        <StackProvider app={stackServerApp}>
+        {hasStackConfig ? (
+          <StackProvider app={stackServerApp}>
+            <StackTheme>{children}</StackTheme>
+          </StackProvider>
+        ) : (
           <StackTheme>{children}</StackTheme>
-        </StackProvider>
+        )}
         <Analytics />
       </body>
     </html>
