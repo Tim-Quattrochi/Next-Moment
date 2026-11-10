@@ -97,7 +97,11 @@ export function getStageIndex(stage: RecoveryStage): number {
  */
 export function getStageProgress(stage: RecoveryStage): number {
   const index = getStageIndex(stage)
-  return Math.round(((index + 1) / STAGE_ORDER.length) * 100)
+  // Guard against an unknown stage; treat as not started
+  if (index < 0) return 0
+  // Compute progress from 0% at the first stage to 100% at the last
+  const lastIndex = Math.max(1, STAGE_ORDER.length - 1)
+  return Math.round((index / lastIndex) * 100)
 }
 
 /**
